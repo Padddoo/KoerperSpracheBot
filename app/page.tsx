@@ -1,13 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { RefreshCw, FileCheck2 } from "lucide-react";
+import { ArrowLeft, Library, FileCheck2 } from "lucide-react";
 import { UploadZone } from "@/components/upload-zone";
 import { MicButton, type MicState } from "@/components/mic-button";
 import { ChatView } from "@/components/chat-view";
 import { ProgressPill } from "@/components/progress-pill";
+import { LibraryPicker } from "@/components/library-picker";
 import { Button } from "@/components/ui/button";
 import type {
+  LibraryEntry,
   Message,
   ProgressForMaterial,
   SessionInfo,
@@ -18,6 +20,13 @@ import {
   loadProgress,
   recordTurn,
 } from "@/lib/progress";
+import {
+  entryToSession,
+  loadLibrary,
+  sessionToEntry,
+  touchEntry,
+  upsertEntry,
+} from "@/lib/library";
 
 const STORAGE_KEY = "fred-lernt.session.v1";
 const MAX_RECORDING_MS = 60_000;
@@ -49,6 +58,8 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressForMaterial>({});
   const [currentTopic, setCurrentTopic] = useState<string | null>(null);
+  const [library, setLibrary] = useState<LibraryEntry[]>([]);
+  const [showUploadView, setShowUploadView] = useState(false);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -56,8 +67,11 @@ export default function Home() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const stopTimerRef = useRef<number | null>(null);
 
-  // Restore session from localStorage
+  // Initial load: library + session (+ auto-add current session to library)
   useEffect(() => {
+    const lib = loadLibrary();
+    setLibrary(lib);
+
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
@@ -66,11 +80,15 @@ export default function Home() {
           setSession(parsed.session);
           setMessages(parsed.messages ?? []);
           setProgress(loadProgress(parsed.session.materialHash));
-          // Setze das zuletzt aktive Thema, falls vorhanden
           const lastAssistant = [...(parsed.messages ?? [])]
             .reverse()
             .find((m) => m.role === "assistant" && m.meta?.topic);
           setCurrentTopic(lastAssistant?.meta?.topic ?? null);
+
+          // Auto-add existing session to library if not present
+          if (!lib.some((e) => e.materialHash === parsed.session.materialHash)) {
+            setLibrary(upsertEntry(sessionToEntry(parsed.session)));
+          }
         }
       }
     } catch {
@@ -87,13 +105,14 @@ export default function Home() {
     }
   }, [session, messages]);
 
-  const resetSession = useCallback(() => {
+  const backToLibrary = useCallback(() => {
     localStorage.removeItem(STORAGE_KEY);
     setSession(null);
     setMessages([]);
     setProgress({});
     setCurrentTopic(null);
     setError(null);
+    setShowUploadView(false);
   }, []);
 
   const resetProgress = useCallback(() => {
@@ -101,6 +120,16 @@ export default function Home() {
     clearProgress(session.materialHash);
     setProgress({});
   }, [session]);
+
+  const pickFromLibrary = useCallback((entry: LibraryEntry) => {
+    const info = entryToSession(entry);
+    setSession(info);
+    setMessages([]);
+    setProgress(loadProgress(entry.materialHash));
+    setCurrentTopic(null);
+    setLibrary(touchEntry(entry.materialHash));
+    setShowUploadView(false);
+  }, []);
 
   const speak = useCallback(async (text: string) => {
     try {
@@ -193,7 +222,6 @@ export default function Home() {
           verdict: Verdict;
         };
 
-        // Fortschritt aktualisieren
         const updated = recordTurn(session.materialHash, topic, verdict);
         setProgress(updated);
         setCurrentTopic(topic);
@@ -278,74 +306,104 @@ export default function Home() {
     else if (micState === "recording") stopRecording();
   }, [micState, startRecording, stopRecording]);
 
-  if (!session) {
+  // --- View selection ---
+
+  // Learning view (active session)
+  if (session) {
     return (
-      <main className="min-h-screen bg-bg px-4 py-10">
-        <UploadZone
-          onUploaded={(info) => {
-            setSession(info);
-            setMessages([]);
-            setProgress(loadProgress(info.materialHash));
-            setCurrentTopic(null);
-          }}
+      <main className="flex min-h-screen flex-col bg-bg">
+        <header className="flex items-center justify-between border-b border-fg/10 bg-white/60 px-4 py-3 backdrop-blur">
+          <div className="flex items-center gap-2 text-sm text-fg/70">
+            <FileCheck2 className="h-4 w-4 text-accent" />
+            <span className="truncate">
+              Material: {session.filenames.length}{" "}
+              {session.filenames.length === 1 ? "Datei" : "Dateien"}
+            </span>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={backToLibrary}
+            className="text-fg/70"
+          >
+            <Library className="h-4 w-4" />
+            Bibliothek
+          </Button>
+        </header>
+
+        <ProgressPill
+          currentTopic={currentTopic}
+          topics={session.topics}
+          progress={progress}
+          onReset={resetProgress}
         />
+
+        <div className="flex-1 overflow-y-auto px-4 pb-40 pt-2">
+          <div className="mx-auto w-full max-w-xl">
+            <ChatView
+              messages={messages}
+              hint={`Tippe den Mikrofon-Knopf und leg los. Du kannst auch sagen: „Lass uns ${session.topics[0] ?? "dieses Thema"} üben."`}
+            />
+          </div>
+        </div>
+
+        <div className="fixed inset-x-0 bottom-0 border-t border-fg/10 bg-bg/95 backdrop-blur">
+          <div className="mx-auto flex max-w-xl flex-col items-center gap-3 px-4 py-6">
+            {error && (
+              <div className="w-full rounded-xl bg-red-50 p-3 text-center text-sm text-red-800">
+                {error}
+              </div>
+            )}
+            <MicButton state={micState} onClick={onMicClick} />
+            <p className="text-xs text-fg/60">
+              {micState === "idle" && "Tippen zum Sprechen"}
+              {micState === "recording" && "Ich höre zu — nochmal tippen zum Stoppen"}
+              {micState === "processing" && "Einen Moment…"}
+              {micState === "speaking" && "Fred hört zu…"}
+            </p>
+          </div>
+        </div>
       </main>
     );
   }
 
-  return (
-    <main className="flex min-h-screen flex-col bg-bg">
-      <header className="flex items-center justify-between border-b border-fg/10 bg-white/60 px-4 py-3 backdrop-blur">
-        <div className="flex items-center gap-2 text-sm text-fg/70">
-          <FileCheck2 className="h-4 w-4 text-accent" />
-          <span>
-            Material: {session.filenames.length}{" "}
-            {session.filenames.length === 1 ? "Datei" : "Dateien"}
-          </span>
-        </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={resetSession}
-          className="text-fg/70"
-        >
-          <RefreshCw className="h-4 w-4" />
-          Neues Material
-        </Button>
-      </header>
-
-      <ProgressPill
-        currentTopic={currentTopic}
-        topics={session.topics}
-        progress={progress}
-        onReset={resetProgress}
-      />
-
-      <div className="flex-1 overflow-y-auto px-4 pb-40 pt-2">
+  // Upload view (library empty OR user chose "Neues Material")
+  if (showUploadView || library.length === 0) {
+    return (
+      <main className="min-h-screen bg-bg px-4 py-8">
         <div className="mx-auto w-full max-w-xl">
-          <ChatView
-            messages={messages}
-            hint={`Tippe den Mikrofon-Knopf und leg los. Du kannst auch sagen: „Lass uns ${session.topics[0] ?? "dieses Thema"} üben."`}
+          {library.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowUploadView(false)}
+              className="mb-4 inline-flex items-center gap-1.5 text-sm text-fg/60 hover:text-fg"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Zurück zur Bibliothek
+            </button>
+          )}
+          <UploadZone
+            onUploaded={(info) => {
+              setSession(info);
+              setMessages([]);
+              setProgress(loadProgress(info.materialHash));
+              setCurrentTopic(null);
+              setLibrary(upsertEntry(sessionToEntry(info)));
+              setShowUploadView(false);
+            }}
           />
         </div>
-      </div>
+      </main>
+    );
+  }
 
-      <div className="fixed inset-x-0 bottom-0 border-t border-fg/10 bg-bg/95 backdrop-blur">
-        <div className="mx-auto flex max-w-xl flex-col items-center gap-3 px-4 py-6">
-          {error && (
-            <div className="w-full rounded-xl bg-red-50 p-3 text-center text-sm text-red-800">
-              {error}
-            </div>
-          )}
-          <MicButton state={micState} onClick={onMicClick} />
-          <p className="text-xs text-fg/60">
-            {micState === "idle" && "Tippen zum Sprechen"}
-            {micState === "recording" && "Ich höre zu — nochmal tippen zum Stoppen"}
-            {micState === "processing" && "Einen Moment…"}
-            {micState === "speaking" && "Fred hört zu…"}
-          </p>
-        </div>
-      </div>
-    </main>
+  // Library picker view
+  return (
+    <LibraryPicker
+      library={library}
+      onSelect={pickFromLibrary}
+      onNewUpload={() => setShowUploadView(true)}
+      onLibraryChange={setLibrary}
+    />
   );
 }
