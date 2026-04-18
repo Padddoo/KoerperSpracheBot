@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, Library, FileCheck2 } from "lucide-react";
+import { ArrowLeft, Library, FileCheck2, MessagesSquare } from "lucide-react";
 import { UploadZone } from "@/components/upload-zone";
 import { MicButton, type MicState } from "@/components/mic-button";
 import { ChatView } from "@/components/chat-view";
 import { ProgressPill } from "@/components/progress-pill";
 import { LibraryPicker } from "@/components/library-picker";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import type {
   LibraryEntry,
   Message,
@@ -29,7 +30,13 @@ import {
 } from "@/lib/library";
 
 const STORAGE_KEY = "fred-lernt.session.v1";
+const CONTINUOUS_KEY = "fred-lernt.continuous.v1";
 const MAX_RECORDING_MS = 60_000;
+
+// Silence detection tuning
+const SILENCE_THRESHOLD = 18; // 0..255 avg frequency-byte
+const SILENCE_DURATION_MS = 1500;
+const MIN_RECORDING_MS = 800;
 
 interface PersistedState {
   session: SessionInfo;
@@ -60,17 +67,33 @@ export default function Home() {
   const [currentTopic, setCurrentTopic] = useState<string | null>(null);
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
   const [showUploadView, setShowUploadView] = useState(false);
+  const [continuousMode, setContinuousMode] = useState(false);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const stopTimerRef = useRef<number | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const continuousModeRef = useRef(false);
+  const userCancelledRef = useRef(false);
+  const startRecordingRef = useRef<(() => Promise<void>) | null>(null);
 
-  // Initial load: library + session (+ auto-add current session to library)
+  useEffect(() => {
+    continuousModeRef.current = continuousMode;
+    try {
+      localStorage.setItem(CONTINUOUS_KEY, continuousMode ? "1" : "0");
+    } catch {}
+  }, [continuousMode]);
+
   useEffect(() => {
     const lib = loadLibrary();
     setLibrary(lib);
+
+    try {
+      const rawCont = localStorage.getItem(CONTINUOUS_KEY);
+      if (rawCont === "1") setContinuousMode(true);
+    } catch {}
 
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -85,15 +108,12 @@ export default function Home() {
             .find((m) => m.role === "assistant" && m.meta?.topic);
           setCurrentTopic(lastAssistant?.meta?.topic ?? null);
 
-          // Auto-add existing session to library if not present
           if (!lib.some((e) => e.materialHash === parsed.session.materialHash)) {
             setLibrary(upsertEntry(sessionToEntry(parsed.session)));
           }
         }
       }
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, []);
 
   useEffect(() => {
@@ -105,15 +125,28 @@ export default function Home() {
     }
   }, [session, messages]);
 
+  const teardownAudioContext = useCallback(() => {
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+  }, []);
+
   const backToLibrary = useCallback(() => {
     localStorage.removeItem(STORAGE_KEY);
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    teardownAudioContext();
     setSession(null);
     setMessages([]);
     setProgress({});
     setCurrentTopic(null);
     setError(null);
     setShowUploadView(false);
-  }, []);
+    setMicState("idle");
+  }, [teardownAudioContext]);
 
   const resetProgress = useCallback(() => {
     if (!session) return;
@@ -131,32 +164,34 @@ export default function Home() {
     setShowUploadView(false);
   }, []);
 
-  const speak = useCallback(async (text: string) => {
-    try {
-      setMicState("speaking");
-      const res = await fetch("/api/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
-      if (!res.ok) throw new Error("TTS fehlgeschlagen");
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audioRef.current = audio;
-      audio.onended = () => {
-        URL.revokeObjectURL(url);
-        setMicState("idle");
-      };
-      audio.onerror = () => {
-        URL.revokeObjectURL(url);
-        setMicState("idle");
-      };
-      await audio.play();
-    } catch (err) {
-      console.error(err);
-      setMicState("idle");
-    }
+  // Progressive TTS: direktes audio.src auf den streamenden GET-Endpoint.
+  // Browser fängt an zu spielen, sobald genug Bytes da sind — spart 1–2s.
+  const speak = useCallback((text: string): Promise<void> => {
+    return new Promise((resolve) => {
+      try {
+        setMicState("speaking");
+        const url = `/api/tts?text=${encodeURIComponent(text)}`;
+        const audio = new Audio(url);
+        audio.preload = "auto";
+        audioRef.current = audio;
+        const done = () => {
+          audioRef.current = null;
+          resolve();
+        };
+        audio.onended = done;
+        audio.onerror = () => {
+          console.warn("TTS Audio-Fehler");
+          done();
+        };
+        audio.play().catch((err) => {
+          console.warn("Audio konnte nicht starten:", err);
+          done();
+        });
+      } catch (err) {
+        console.error(err);
+        resolve();
+      }
+    });
   }, []);
 
   const handleAudioBlob = useCallback(
@@ -164,7 +199,9 @@ export default function Home() {
       if (!session) return;
       if (blob.size < 2000) {
         setMicState("idle");
-        setError("Das war sehr kurz. Tippe nochmal und sprich länger.");
+        if (!continuousModeRef.current) {
+          setError("Das war sehr kurz. Tippe nochmal und sprich länger.");
+        }
         return;
       }
       setMicState("processing");
@@ -188,7 +225,9 @@ export default function Home() {
         const userText = (text || "").trim();
         if (!userText) {
           setMicState("idle");
-          setError("Ich habe nichts gehört. Tippe nochmal und sprich laut.");
+          if (!continuousModeRef.current) {
+            setError("Ich habe nichts gehört. Tippe nochmal und sprich laut.");
+          }
           return;
         }
 
@@ -236,6 +275,17 @@ export default function Home() {
         ]);
 
         await speak(assistantMessage);
+        setMicState("idle");
+
+        // Dialog-Modus: nach TTS automatisch wieder zuhören
+        if (continuousModeRef.current && !userCancelledRef.current) {
+          setTimeout(() => {
+            if (continuousModeRef.current && !userCancelledRef.current) {
+              startRecordingRef.current?.();
+            }
+          }, 350);
+        }
+        userCancelledRef.current = false;
       } catch (err) {
         console.error(err);
         setError(
@@ -252,6 +302,7 @@ export default function Home() {
   const startRecording = useCallback(async () => {
     try {
       setError(null);
+      userCancelledRef.current = false;
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       const mimeType = pickMimeType();
@@ -268,9 +319,14 @@ export default function Home() {
         const blob = new Blob(chunksRef.current, { type: effectiveMime });
         streamRef.current?.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
+        teardownAudioContext();
         if (stopTimerRef.current) {
           window.clearTimeout(stopTimerRef.current);
           stopTimerRef.current = null;
+        }
+        if (userCancelledRef.current) {
+          setMicState("idle");
+          return;
         }
         handleAudioBlob(blob, effectiveMime);
       };
@@ -281,6 +337,55 @@ export default function Home() {
       stopTimerRef.current = window.setTimeout(() => {
         if (recorder.state === "recording") recorder.stop();
       }, MAX_RECORDING_MS);
+
+      // Silence detection im Dialog-Modus
+      if (continuousModeRef.current) {
+        try {
+          const AudioCtx =
+            window.AudioContext ||
+            (window as unknown as { webkitAudioContext: typeof AudioContext })
+              .webkitAudioContext;
+          const audioContext = new AudioCtx();
+          audioContextRef.current = audioContext;
+          const source = audioContext.createMediaStreamSource(stream);
+          const analyser = audioContext.createAnalyser();
+          analyser.fftSize = 512;
+          source.connect(analyser);
+          const buffer = new Uint8Array(analyser.frequencyBinCount);
+          const recordingStart = performance.now();
+          let hasHeardSpeech = false;
+          let silenceStart = 0;
+
+          const tick = () => {
+            if (recorder.state !== "recording") return;
+            analyser.getByteFrequencyData(buffer);
+            let sum = 0;
+            for (let i = 0; i < buffer.length; i++) sum += buffer[i];
+            const avg = sum / buffer.length;
+
+            if (avg > SILENCE_THRESHOLD) {
+              hasHeardSpeech = true;
+              silenceStart = 0;
+            } else if (
+              hasHeardSpeech &&
+              performance.now() - recordingStart > MIN_RECORDING_MS
+            ) {
+              if (!silenceStart) silenceStart = performance.now();
+              else if (
+                performance.now() - silenceStart >
+                SILENCE_DURATION_MS
+              ) {
+                recorder.stop();
+                return;
+              }
+            }
+            requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+        } catch (e) {
+          console.warn("Silence detection nicht verfügbar:", e);
+        }
+      }
     } catch (err) {
       console.error(err);
       if (err instanceof DOMException && err.name === "NotAllowedError") {
@@ -292,9 +397,21 @@ export default function Home() {
       }
       setMicState("idle");
     }
-  }, [handleAudioBlob]);
+  }, [handleAudioBlob, teardownAudioContext]);
+
+  useEffect(() => {
+    startRecordingRef.current = startRecording;
+  }, [startRecording]);
 
   const stopRecording = useCallback(() => {
+    const recorder = recorderRef.current;
+    if (recorder && recorder.state === "recording") {
+      recorder.stop();
+    }
+  }, []);
+
+  const cancelRecording = useCallback(() => {
+    userCancelledRef.current = true;
     const recorder = recorderRef.current;
     if (recorder && recorder.state === "recording") {
       recorder.stop();
@@ -306,9 +423,24 @@ export default function Home() {
     else if (micState === "recording") stopRecording();
   }, [micState, startRecording, stopRecording]);
 
+  const toggleContinuous = useCallback(() => {
+    setContinuousMode((v) => {
+      const next = !v;
+      if (!next) userCancelledRef.current = true;
+      return next;
+    });
+  }, []);
+
+  useEffect(
+    () => () => {
+      teardownAudioContext();
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+    },
+    [teardownAudioContext],
+  );
+
   // --- View selection ---
 
-  // Learning view (active session)
   if (session) {
     return (
       <main className="flex min-h-screen flex-col bg-bg">
@@ -338,7 +470,7 @@ export default function Home() {
           onReset={resetProgress}
         />
 
-        <div className="flex-1 overflow-y-auto px-4 pb-40 pt-2">
+        <div className="flex-1 overflow-y-auto px-4 pb-44 pt-2">
           <div className="mx-auto w-full max-w-xl">
             <ChatView
               messages={messages}
@@ -348,7 +480,21 @@ export default function Home() {
         </div>
 
         <div className="fixed inset-x-0 bottom-0 border-t border-fg/10 bg-bg/95 backdrop-blur">
-          <div className="mx-auto flex max-w-xl flex-col items-center gap-3 px-4 py-6">
+          <div className="mx-auto flex max-w-xl flex-col items-center gap-2 px-4 pb-6 pt-3">
+            <button
+              type="button"
+              onClick={toggleContinuous}
+              aria-pressed={continuousMode}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-colors",
+                continuousMode
+                  ? "border-accent bg-accent text-white"
+                  : "border-fg/20 bg-white/70 text-fg/70 hover:bg-accent-soft",
+              )}
+            >
+              <MessagesSquare className="h-3.5 w-3.5" />
+              Dialog-Modus {continuousMode ? "an" : "aus"}
+            </button>
             {error && (
               <div className="w-full rounded-xl bg-red-50 p-3 text-center text-sm text-red-800">
                 {error}
@@ -356,18 +502,32 @@ export default function Home() {
             )}
             <MicButton state={micState} onClick={onMicClick} />
             <p className="text-xs text-fg/60">
-              {micState === "idle" && "Tippen zum Sprechen"}
-              {micState === "recording" && "Ich höre zu — nochmal tippen zum Stoppen"}
+              {micState === "idle" &&
+                (continuousMode
+                  ? "Tippen zum Starten — ich höre dann automatisch zu"
+                  : "Tippen zum Sprechen")}
+              {micState === "recording" &&
+                (continuousMode
+                  ? "Ich höre zu — stoppt automatisch, wenn Du fertig bist"
+                  : "Ich höre zu — nochmal tippen zum Stoppen")}
               {micState === "processing" && "Einen Moment…"}
               {micState === "speaking" && "Fred hört zu…"}
             </p>
+            {micState === "recording" && continuousMode && (
+              <button
+                type="button"
+                onClick={cancelRecording}
+                className="text-xs text-fg/50 underline underline-offset-2"
+              >
+                Abbrechen
+              </button>
+            )}
           </div>
         </div>
       </main>
     );
   }
 
-  // Upload view (library empty OR user chose "Neues Material")
   if (showUploadView || library.length === 0) {
     return (
       <main className="min-h-screen bg-bg px-4 py-8">
@@ -397,7 +557,6 @@ export default function Home() {
     );
   }
 
-  // Library picker view
   return (
     <LibraryPicker
       library={library}
