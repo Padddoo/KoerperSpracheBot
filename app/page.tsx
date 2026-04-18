@@ -24,6 +24,7 @@ import type {
   Verdict,
 } from "@/types";
 import { applyTurn } from "@/lib/progress";
+import { AudioQueue } from "@/lib/audio-queue";
 import { entryToSession, sessionToEntry } from "@/lib/library";
 import {
   clearFamilyCode,
@@ -82,6 +83,7 @@ export default function Home() {
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioQueueRef = useRef<AudioQueue | null>(null);
   const stopTimerRef = useRef<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const continuousModeRef = useRef(false);
@@ -154,6 +156,10 @@ export default function Home() {
 
   const stopEverything = useCallback(() => {
     userCancelledRef.current = true;
+    if (audioQueueRef.current) {
+      audioQueueRef.current.stop();
+      audioQueueRef.current = null;
+    }
     if (audioRef.current) {
       try {
         audioRef.current.pause();
@@ -276,34 +282,6 @@ export default function Home() {
     [familyCode],
   );
 
-  const speak = useCallback((text: string): Promise<void> => {
-    return new Promise((resolve) => {
-      try {
-        setMicState("speaking");
-        const url = `/api/tts?text=${encodeURIComponent(text)}`;
-        const audio = new Audio(url);
-        audio.preload = "auto";
-        audioRef.current = audio;
-        const done = () => {
-          audioRef.current = null;
-          resolve();
-        };
-        audio.onended = done;
-        audio.onerror = () => {
-          console.warn("TTS Audio-Fehler");
-          done();
-        };
-        audio.play().catch((err) => {
-          console.warn("Audio konnte nicht starten:", err);
-          done();
-        });
-      } catch (err) {
-        console.error(err);
-        resolve();
-      }
-    });
-  }, []);
-
   const handleAudioBlob = useCallback(
     async (blob: Blob, mimeType: string) => {
       if (!session || !familyCode) return;
@@ -357,30 +335,65 @@ export default function Home() {
             history: messages,
           }),
         });
-        if (!cRes.ok) {
+        if (!cRes.ok || !cRes.body) {
           const data = await cRes.json().catch(() => ({}));
           throw new Error(data.error || "Chat fehlgeschlagen");
         }
-        const {
-          assistantMessage,
-          topic,
-          verdict,
-        } = (await cRes.json()) as {
-          assistantMessage: string;
-          topic: string;
-          verdict: Verdict;
-        };
 
+        // SSE-Reader: satzweise TTS starten, sobald Sätze reinkommen
+        setMicState("speaking");
+        const queue = new AudioQueue();
+        audioQueueRef.current = queue;
+
+        const reader = cRes.body.getReader();
+        const decoder = new TextDecoder();
+        let sseBuffer = "";
+        let fullSpoken = "";
+        let finalTopic = "sonstiges";
+        let finalVerdict: Verdict = "none";
+        let streamError: string | null = null;
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          sseBuffer += decoder.decode(value, { stream: true });
+          const events = sseBuffer.split("\n\n");
+          sseBuffer = events.pop() ?? "";
+          for (const ev of events) {
+            const line = ev.trim();
+            if (!line.startsWith("data:")) continue;
+            const data = line.slice(5).trim();
+            if (!data) continue;
+            try {
+              const obj = JSON.parse(data) as
+                | { type: "sentence"; text: string }
+                | { type: "final"; full: string; topic: string; verdict: Verdict }
+                | { type: "error"; error: string };
+              if (obj.type === "sentence") {
+                queue.enqueue(obj.text);
+              } else if (obj.type === "final") {
+                fullSpoken = obj.full || fullSpoken;
+                finalTopic = obj.topic || finalTopic;
+                finalVerdict = obj.verdict || finalVerdict;
+              } else if (obj.type === "error") {
+                streamError = obj.error;
+              }
+            } catch {
+              // skip malformed event
+            }
+          }
+        }
+
+        if (streamError) throw new Error(streamError);
+
+        // Fortschritt aktualisieren
         const currentForMat = progressAll[session.materialHash] ?? {};
-        const nextForMat = applyTurn(currentForMat, topic, verdict);
-        // Optimistic update
+        const nextForMat = applyTurn(currentForMat, finalTopic, finalVerdict);
         setProgressAll({
           ...progressAll,
           [session.materialHash]: nextForMat,
         });
-        setCurrentTopic(topic);
-
-        // Fire-and-forget server sync (non-blocking)
+        setCurrentTopic(finalTopic);
         saveProgressRemote(familyCode, session.materialHash, nextForMat).catch(
           (err) => console.warn("progress sync failed", err),
         );
@@ -389,12 +402,14 @@ export default function Home() {
           ...nextHistory,
           {
             role: "assistant",
-            content: assistantMessage,
-            meta: { topic, verdict },
+            content: fullSpoken,
+            meta: { topic: finalTopic, verdict: finalVerdict },
           },
         ]);
 
-        await speak(assistantMessage);
+        // Warten, bis alle Sätze abgespielt sind
+        await queue.waitForComplete();
+        audioQueueRef.current = null;
         setMicState("idle");
 
         if (continuousModeRef.current && !userCancelledRef.current) {
@@ -407,6 +422,8 @@ export default function Home() {
         userCancelledRef.current = false;
       } catch (err) {
         console.error(err);
+        audioQueueRef.current?.stop();
+        audioQueueRef.current = null;
         setError(
           err instanceof Error
             ? err.message
@@ -415,7 +432,7 @@ export default function Home() {
         setMicState("idle");
       }
     },
-    [familyCode, messages, progressAll, session, speak],
+    [familyCode, messages, progressAll, session],
   );
 
   const startRecording = useCallback(async () => {
