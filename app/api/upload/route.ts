@@ -1,15 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractTextFromFile } from "@/lib/extract-text";
-import { saveSession, createSessionId } from "@/lib/session-store";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+
+function createSessionId(): string {
+  return `ses_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
 
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
     const files = formData.getAll("files").filter((f): f is File => f instanceof File);
-    const existingSessionId = formData.get("sessionId");
 
     if (files.length === 0) {
       return NextResponse.json(
@@ -35,17 +37,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const sessionId =
-      typeof existingSessionId === "string" && existingSessionId
-        ? existingSessionId
-        : createSessionId();
-
-    saveSession(sessionId, combinedText, filenames);
-
     return NextResponse.json({
-      sessionId,
+      sessionId: createSessionId(),
       filenames,
       charCount: combinedText.length,
+      material: combinedText,
     });
   } catch (err) {
     console.error("[upload] error:", err);
