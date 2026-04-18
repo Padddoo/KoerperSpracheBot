@@ -418,18 +418,49 @@ export default function Home() {
     }
   }, []);
 
+  const stopEverything = useCallback(() => {
+    userCancelledRef.current = true;
+    // Audio stoppen
+    if (audioRef.current) {
+      try {
+        audioRef.current.pause();
+        audioRef.current.src = "";
+      } catch {}
+      audioRef.current = null;
+    }
+    // Recording stoppen
+    const recorder = recorderRef.current;
+    if (recorder && recorder.state === "recording") {
+      try {
+        recorder.stop();
+      } catch {}
+    }
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    teardownAudioContext();
+    if (stopTimerRef.current) {
+      window.clearTimeout(stopTimerRef.current);
+      stopTimerRef.current = null;
+    }
+    setMicState("idle");
+  }, [teardownAudioContext]);
+
   const onMicClick = useCallback(() => {
     if (micState === "idle") startRecording();
     else if (micState === "recording") stopRecording();
-  }, [micState, startRecording, stopRecording]);
+    else if (micState === "speaking") stopEverything();
+  }, [micState, startRecording, stopRecording, stopEverything]);
 
   const toggleContinuous = useCallback(() => {
     setContinuousMode((v) => {
       const next = !v;
-      if (!next) userCancelledRef.current = true;
+      if (!next) {
+        // Beim Ausschalten: alles sofort stoppen
+        stopEverything();
+      }
       return next;
     });
-  }, []);
+  }, [stopEverything]);
 
   useEffect(
     () => () => {
@@ -511,7 +542,7 @@ export default function Home() {
                   ? "Ich höre zu — stoppt automatisch, wenn Du fertig bist"
                   : "Ich höre zu — nochmal tippen zum Stoppen")}
               {micState === "processing" && "Einen Moment…"}
-              {micState === "speaking" && "Fred hört zu…"}
+              {micState === "speaking" && "Tippen zum Stoppen"}
             </p>
             {micState === "recording" && continuousMode && (
               <button
