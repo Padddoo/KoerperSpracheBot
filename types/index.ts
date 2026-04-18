@@ -27,3 +27,14 @@ export interface TopicStats {
 }
 
 export type ProgressForMaterial = Record<string, TopicStats>;
+
+export interface LibraryEntry {
+  materialHash: string;
+  filenames: string[];
+  material: string;
+  topics: string[];
+  charCount: number;
+  createdAt: number;
+  lastUsedAt: number;
+  displayName?: string;
+}
