@@ -2,29 +2,32 @@
 
 import { useState } from "react";
 import { FileText, Plus, Trash2, Pencil, Check, X } from "lucide-react";
-import type { LibraryEntry } from "@/types";
-import {
-  displayNameFor,
-  relativeTime,
-  removeEntry,
-  renameEntry,
-} from "@/lib/library";
-import { loadProgress, totalsForMaterial } from "@/lib/progress";
+import type { LibraryEntry, ProgressForMaterial } from "@/types";
+import { displayNameFor, relativeTime } from "@/lib/library";
+import { totalsForMaterial } from "@/lib/progress";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+type ProgressMap = Record<string, ProgressForMaterial>;
+
 interface Props {
   library: LibraryEntry[];
+  progress: ProgressMap;
   onSelect: (entry: LibraryEntry) => void;
   onNewUpload: () => void;
-  onLibraryChange: (next: LibraryEntry[]) => void;
+  onDelete: (entry: LibraryEntry) => void | Promise<void>;
+  onRename: (entry: LibraryEntry, newName: string) => void | Promise<void>;
+  onChangeCode: () => void;
 }
 
 export function LibraryPicker({
   library,
+  progress,
   onSelect,
   onNewUpload,
-  onLibraryChange,
+  onDelete,
+  onRename,
+  onChangeCode,
 }: Props) {
   const sorted = [...library].sort((a, b) => b.lastUsedAt - a.lastUsedAt);
   const [editingHash, setEditingHash] = useState<string | null>(null);
@@ -35,20 +38,21 @@ export function LibraryPicker({
     setEditValue(displayNameFor(entry));
   };
 
-  const confirmRename = () => {
+  const confirmRename = async () => {
     if (editingHash) {
-      onLibraryChange(renameEntry(editingHash, editValue));
+      const entry = library.find((e) => e.materialHash === editingHash);
+      if (entry) await onRename(entry, editValue);
     }
     setEditingHash(null);
   };
 
-  const handleDelete = (entry: LibraryEntry) => {
+  const handleDelete = async (entry: LibraryEntry) => {
     if (
       confirm(
-        `"${displayNameFor(entry)}" wirklich aus der Bibliothek entfernen? Der Lernfortschritt bleibt auf dem Gerät.`,
+        `"${displayNameFor(entry)}" wirklich aus der Bibliothek entfernen? Der Lernfortschritt wird ebenfalls gelöscht.`,
       )
     ) {
-      onLibraryChange(removeEntry(entry.materialHash));
+      await onDelete(entry);
     }
   };
 
@@ -64,8 +68,8 @@ export function LibraryPicker({
 
         <div className="space-y-3">
           {sorted.map((entry) => {
-            const progress = loadProgress(entry.materialHash);
-            const totals = totalsForMaterial(progress);
+            const p = progress[entry.materialHash] ?? {};
+            const totals = totalsForMaterial(p);
             const hasActivity =
               totals.correct + totals.partial + totals.incorrect > 0;
             const isEditing = editingHash === entry.materialHash;
@@ -121,10 +125,7 @@ export function LibraryPicker({
                   <div className="flex flex-none items-center gap-1">
                     {isEditing ? (
                       <>
-                        <IconBtn
-                          label="Speichern"
-                          onClick={confirmRename}
-                        >
+                        <IconBtn label="Speichern" onClick={confirmRename}>
                           <Check className="h-4 w-4" />
                         </IconBtn>
                         <IconBtn
@@ -167,10 +168,15 @@ export function LibraryPicker({
           Neues Material hochladen
         </Button>
 
-        <p className="text-center text-xs text-fg/50">
-          Alles bleibt auf deinem Gerät — nichts wird in der Cloud
-          gespeichert.
-        </p>
+        <div className="flex items-center justify-center gap-2 text-xs text-fg/50">
+          <button
+            type="button"
+            onClick={onChangeCode}
+            className="underline underline-offset-2 hover:text-fg"
+          >
+            Familien-Code ändern
+          </button>
+        </div>
       </div>
     </main>
   );

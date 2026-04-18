@@ -1,12 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, Library, FileCheck2, MessagesSquare } from "lucide-react";
+import {
+  ArrowLeft,
+  Library,
+  FileCheck2,
+  MessagesSquare,
+  Loader2,
+} from "lucide-react";
 import { UploadZone } from "@/components/upload-zone";
 import { MicButton, type MicState } from "@/components/mic-button";
 import { ChatView } from "@/components/chat-view";
 import { ProgressPill } from "@/components/progress-pill";
 import { LibraryPicker } from "@/components/library-picker";
+import { SetupCode } from "@/components/setup-code";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type {
@@ -16,24 +23,26 @@ import type {
   SessionInfo,
   Verdict,
 } from "@/types";
+import { applyTurn } from "@/lib/progress";
+import { entryToSession, sessionToEntry } from "@/lib/library";
 import {
-  clearProgress,
-  loadProgress,
-  recordTurn,
-} from "@/lib/progress";
-import {
-  entryToSession,
-  loadLibrary,
-  sessionToEntry,
-  touchEntry,
-  upsertEntry,
-} from "@/lib/library";
+  clearFamilyCode,
+  clearProgressRemote,
+  deleteEntryRemote,
+  fetchAll,
+  loadFamilyCode,
+  renameEntryRemote,
+  saveFamilyCode,
+  saveProgressRemote,
+  upsertEntryRemote,
+} from "@/lib/sync";
+
+type ProgressMap = Record<string, ProgressForMaterial>;
 
 const CONTINUOUS_KEY = "fred-lernt.continuous.v1";
 const MAX_RECORDING_MS = 60_000;
 
-// Silence detection tuning
-const SILENCE_THRESHOLD = 18; // 0..255 avg frequency-byte
+const SILENCE_THRESHOLD = 18;
 const SILENCE_DURATION_MS = 1500;
 const MIN_RECORDING_MS = 800;
 
@@ -53,13 +62,19 @@ function pickMimeType(): string {
 }
 
 export default function Home() {
+  const [familyCode, setFamilyCode] = useState<string | null>(null);
+  const [codeChecked, setCodeChecked] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [remoteError, setRemoteError] = useState<string | null>(null);
+
+  const [library, setLibrary] = useState<LibraryEntry[]>([]);
+  const [progressAll, setProgressAll] = useState<ProgressMap>({});
+
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [micState, setMicState] = useState<MicState>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [progress, setProgress] = useState<ProgressForMaterial>({});
   const [currentTopic, setCurrentTopic] = useState<string | null>(null);
-  const [library, setLibrary] = useState<LibraryEntry[]>([]);
   const [showUploadView, setShowUploadView] = useState(false);
   const [continuousMode, setContinuousMode] = useState(false);
 
@@ -80,13 +95,54 @@ export default function Home() {
     } catch {}
   }, [continuousMode]);
 
+  // Load code from localStorage + fetch data from server
   useEffect(() => {
-    setLibrary(loadLibrary());
+    const code = loadFamilyCode();
+    setFamilyCode(code);
+    setCodeChecked(true);
 
     try {
       const rawCont = localStorage.getItem(CONTINUOUS_KEY);
       if (rawCont === "1") setContinuousMode(true);
     } catch {}
+  }, []);
+
+  const loadRemote = useCallback(async (code: string) => {
+    setLoading(true);
+    setRemoteError(null);
+    try {
+      const data = await fetchAll(code);
+      setLibrary(data.library);
+      setProgressAll(data.progress);
+    } catch (err) {
+      console.error(err);
+      setRemoteError(
+        err instanceof Error
+          ? err.message
+          : "Konnte Bibliothek nicht laden.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (familyCode) loadRemote(familyCode);
+  }, [familyCode, loadRemote]);
+
+  const handleCodeSubmit = useCallback((code: string) => {
+    saveFamilyCode(code);
+    setFamilyCode(code);
+  }, []);
+
+  const changeCode = useCallback(() => {
+    if (!confirm("Wirklich den Familien-Code ändern? Die Bibliothek wird neu geladen.")) return;
+    clearFamilyCode();
+    setFamilyCode(null);
+    setLibrary([]);
+    setProgressAll({});
+    setSession(null);
+    setMessages([]);
   }, []);
 
   const teardownAudioContext = useCallback(() => {
@@ -96,39 +152,130 @@ export default function Home() {
     }
   }, []);
 
-  const backToLibrary = useCallback(() => {
+  const stopEverything = useCallback(() => {
+    userCancelledRef.current = true;
     if (audioRef.current) {
-      audioRef.current.pause();
+      try {
+        audioRef.current.pause();
+        audioRef.current.src = "";
+      } catch {}
       audioRef.current = null;
     }
+    const recorder = recorderRef.current;
+    if (recorder && recorder.state === "recording") {
+      try {
+        recorder.stop();
+      } catch {}
+    }
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
     teardownAudioContext();
-    setSession(null);
-    setMessages([]);
-    setProgress({});
-    setCurrentTopic(null);
-    setError(null);
-    setShowUploadView(false);
+    if (stopTimerRef.current) {
+      window.clearTimeout(stopTimerRef.current);
+      stopTimerRef.current = null;
+    }
     setMicState("idle");
   }, [teardownAudioContext]);
 
-  const resetProgress = useCallback(() => {
-    if (!session) return;
-    clearProgress(session.materialHash);
-    setProgress({});
-  }, [session]);
-
-  const pickFromLibrary = useCallback((entry: LibraryEntry) => {
-    const info = entryToSession(entry);
-    setSession(info);
+  const backToLibrary = useCallback(() => {
+    stopEverything();
+    setSession(null);
     setMessages([]);
-    setProgress(loadProgress(entry.materialHash));
     setCurrentTopic(null);
-    setLibrary(touchEntry(entry.materialHash));
+    setError(null);
     setShowUploadView(false);
-  }, []);
+  }, [stopEverything]);
 
-  // Progressive TTS: direktes audio.src auf den streamenden GET-Endpoint.
-  // Browser fängt an zu spielen, sobald genug Bytes da sind — spart 1–2s.
+  const sessionProgress: ProgressForMaterial = session
+    ? (progressAll[session.materialHash] ?? {})
+    : {};
+
+  const resetProgress = useCallback(async () => {
+    if (!session || !familyCode) return;
+    try {
+      const next = await clearProgressRemote(familyCode, session.materialHash);
+      setProgressAll(next);
+    } catch (err) {
+      console.error(err);
+    }
+  }, [familyCode, session]);
+
+  const pickFromLibrary = useCallback(
+    async (entry: LibraryEntry) => {
+      const info = entryToSession(entry);
+      setSession(info);
+      setMessages([]);
+      setCurrentTopic(null);
+      setShowUploadView(false);
+      // touch lastUsedAt on server
+      if (familyCode) {
+        try {
+          const touched: LibraryEntry = { ...entry, lastUsedAt: Date.now() };
+          const nextLib = await upsertEntryRemote(familyCode, touched);
+          setLibrary(nextLib);
+        } catch (err) {
+          console.warn("touch failed", err);
+        }
+      }
+    },
+    [familyCode],
+  );
+
+  const handleUploaded = useCallback(
+    async (info: SessionInfo) => {
+      setSession(info);
+      setMessages([]);
+      setCurrentTopic(null);
+      setShowUploadView(false);
+      if (familyCode) {
+        try {
+          const nextLib = await upsertEntryRemote(
+            familyCode,
+            sessionToEntry(info),
+          );
+          setLibrary(nextLib);
+        } catch (err) {
+          console.error("upsert failed", err);
+          setError(
+            "Material wurde geladen, aber konnte nicht in die Bibliothek gespeichert werden.",
+          );
+        }
+      }
+    },
+    [familyCode],
+  );
+
+  const handleDelete = useCallback(
+    async (entry: LibraryEntry) => {
+      if (!familyCode) return;
+      try {
+        const data = await deleteEntryRemote(familyCode, entry.materialHash);
+        setLibrary(data.library);
+        setProgressAll(data.progress);
+      } catch (err) {
+        console.error(err);
+      }
+    },
+    [familyCode],
+  );
+
+  const handleRename = useCallback(
+    async (entry: LibraryEntry, newName: string) => {
+      if (!familyCode) return;
+      try {
+        const nextLib = await renameEntryRemote(
+          familyCode,
+          entry.materialHash,
+          newName,
+        );
+        setLibrary(nextLib);
+      } catch (err) {
+        console.error(err);
+      }
+    },
+    [familyCode],
+  );
+
   const speak = useCallback((text: string): Promise<void> => {
     return new Promise((resolve) => {
       try {
@@ -159,7 +306,7 @@ export default function Home() {
 
   const handleAudioBlob = useCallback(
     async (blob: Blob, mimeType: string) => {
-      if (!session) return;
+      if (!session || !familyCode) return;
       if (blob.size < 2000) {
         setMicState("idle");
         if (!continuousModeRef.current) {
@@ -224,9 +371,19 @@ export default function Home() {
           verdict: Verdict;
         };
 
-        const updated = recordTurn(session.materialHash, topic, verdict);
-        setProgress(updated);
+        const currentForMat = progressAll[session.materialHash] ?? {};
+        const nextForMat = applyTurn(currentForMat, topic, verdict);
+        // Optimistic update
+        setProgressAll({
+          ...progressAll,
+          [session.materialHash]: nextForMat,
+        });
         setCurrentTopic(topic);
+
+        // Fire-and-forget server sync (non-blocking)
+        saveProgressRemote(familyCode, session.materialHash, nextForMat).catch(
+          (err) => console.warn("progress sync failed", err),
+        );
 
         setMessages([
           ...nextHistory,
@@ -240,7 +397,6 @@ export default function Home() {
         await speak(assistantMessage);
         setMicState("idle");
 
-        // Dialog-Modus: nach TTS automatisch wieder zuhören
         if (continuousModeRef.current && !userCancelledRef.current) {
           setTimeout(() => {
             if (continuousModeRef.current && !userCancelledRef.current) {
@@ -259,7 +415,7 @@ export default function Home() {
         setMicState("idle");
       }
     },
-    [messages, session, speak],
+    [familyCode, messages, progressAll, session, speak],
   );
 
   const startRecording = useCallback(async () => {
@@ -301,7 +457,6 @@ export default function Home() {
         if (recorder.state === "recording") recorder.stop();
       }, MAX_RECORDING_MS);
 
-      // Silence detection im Dialog-Modus
       if (continuousModeRef.current) {
         try {
           const AudioCtx =
@@ -368,45 +523,14 @@ export default function Home() {
 
   const stopRecording = useCallback(() => {
     const recorder = recorderRef.current;
-    if (recorder && recorder.state === "recording") {
-      recorder.stop();
-    }
+    if (recorder && recorder.state === "recording") recorder.stop();
   }, []);
 
   const cancelRecording = useCallback(() => {
     userCancelledRef.current = true;
     const recorder = recorderRef.current;
-    if (recorder && recorder.state === "recording") {
-      recorder.stop();
-    }
+    if (recorder && recorder.state === "recording") recorder.stop();
   }, []);
-
-  const stopEverything = useCallback(() => {
-    userCancelledRef.current = true;
-    // Audio stoppen
-    if (audioRef.current) {
-      try {
-        audioRef.current.pause();
-        audioRef.current.src = "";
-      } catch {}
-      audioRef.current = null;
-    }
-    // Recording stoppen
-    const recorder = recorderRef.current;
-    if (recorder && recorder.state === "recording") {
-      try {
-        recorder.stop();
-      } catch {}
-    }
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-    teardownAudioContext();
-    if (stopTimerRef.current) {
-      window.clearTimeout(stopTimerRef.current);
-      stopTimerRef.current = null;
-    }
-    setMicState("idle");
-  }, [teardownAudioContext]);
 
   const onMicClick = useCallback(() => {
     if (micState === "idle") startRecording();
@@ -417,10 +541,7 @@ export default function Home() {
   const toggleContinuous = useCallback(() => {
     setContinuousMode((v) => {
       const next = !v;
-      if (!next) {
-        // Beim Ausschalten: alles sofort stoppen
-        stopEverything();
-      }
+      if (!next) stopEverything();
       return next;
     });
   }, [stopEverything]);
@@ -433,7 +554,48 @@ export default function Home() {
     [teardownAudioContext],
   );
 
-  // --- View selection ---
+  // --- Views ---
+
+  if (!codeChecked) {
+    return <FullscreenSpinner />;
+  }
+
+  if (!familyCode) {
+    return <SetupCode onSubmit={handleCodeSubmit} />;
+  }
+
+  if (loading && library.length === 0 && !session) {
+    return <FullscreenSpinner />;
+  }
+
+  if (remoteError && !session && library.length === 0) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-bg px-4">
+        <div className="w-full max-w-md rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
+          <p className="font-semibold text-red-900">
+            Verbindung zum Server klappt gerade nicht.
+          </p>
+          <p className="mt-2 text-sm text-red-800">{remoteError}</p>
+          <div className="mt-4 flex flex-col gap-2">
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => familyCode && loadRemote(familyCode)}
+            >
+              Nochmal versuchen
+            </Button>
+            <button
+              type="button"
+              onClick={changeCode}
+              className="text-xs text-fg/60 underline underline-offset-2"
+            >
+              Familien-Code ändern
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   if (session) {
     return (
@@ -460,7 +622,7 @@ export default function Home() {
         <ProgressPill
           currentTopic={currentTopic}
           topics={session.topics}
-          progress={progress}
+          progress={sessionProgress}
           onReset={resetProgress}
         />
 
@@ -536,16 +698,18 @@ export default function Home() {
               Zurück zur Bibliothek
             </button>
           )}
-          <UploadZone
-            onUploaded={(info) => {
-              setSession(info);
-              setMessages([]);
-              setProgress(loadProgress(info.materialHash));
-              setCurrentTopic(null);
-              setLibrary(upsertEntry(sessionToEntry(info)));
-              setShowUploadView(false);
-            }}
-          />
+          <UploadZone onUploaded={handleUploaded} />
+          {library.length === 0 && (
+            <div className="mt-6 text-center">
+              <button
+                type="button"
+                onClick={changeCode}
+                className="text-xs text-fg/50 underline underline-offset-2"
+              >
+                Familien-Code ändern ({familyCode})
+              </button>
+            </div>
+          )}
         </div>
       </main>
     );
@@ -554,9 +718,20 @@ export default function Home() {
   return (
     <LibraryPicker
       library={library}
+      progress={progressAll}
       onSelect={pickFromLibrary}
       onNewUpload={() => setShowUploadView(true)}
-      onLibraryChange={setLibrary}
+      onDelete={handleDelete}
+      onRename={handleRename}
+      onChangeCode={changeCode}
     />
+  );
+}
+
+function FullscreenSpinner() {
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-bg">
+      <Loader2 className="h-8 w-8 animate-spin text-accent" />
+    </main>
   );
 }
