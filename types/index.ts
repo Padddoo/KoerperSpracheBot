@@ -9,4 +9,5 @@ export interface SessionInfo {
   sessionId: string;
   filenames: string[];
   charCount: number;
+  material: string;
 }

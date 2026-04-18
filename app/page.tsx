@@ -143,7 +143,7 @@ export default function Home() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            sessionId: session.sessionId,
+            material: session.material,
             userMessage: userText,
             history: messages,
           }),

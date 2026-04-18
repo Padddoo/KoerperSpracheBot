@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { anthropic, CLAUDE_MODEL, SYSTEM_PROMPT } from "@/lib/anthropic";
-import { getSession } from "@/lib/session-store";
 import type { Message } from "@/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 interface ChatRequest {
-  sessionId: string;
+  material: string;
   userMessage: string;
   history: Message[];
 }
@@ -38,23 +37,12 @@ function logCostEstimate(usage: {
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as ChatRequest;
-    const { sessionId, userMessage, history } = body;
+    const { material, userMessage, history } = body;
 
-    if (!sessionId || !userMessage) {
+    if (!material || !userMessage) {
       return NextResponse.json(
-        { error: "sessionId und userMessage sind erforderlich." },
+        { error: "Material und Nachricht sind erforderlich." },
         { status: 400 },
-      );
-    }
-
-    const session = getSession(sessionId);
-    if (!session) {
-      return NextResponse.json(
-        {
-          error:
-            "Deine Lern-Session ist abgelaufen. Bitte Material neu hochladen.",
-        },
-        { status: 404 },
       );
     }
 
@@ -73,7 +61,7 @@ export async function POST(req: NextRequest) {
         },
         {
           type: "text",
-          text: `<lernmaterial>\n${session.material}\n</lernmaterial>`,
+          text: `<lernmaterial>\n${material}\n</lernmaterial>`,
           cache_control: { type: "ephemeral" },
         },
       ],
