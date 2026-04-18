@@ -4,15 +4,19 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-2xl text-base font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-2xl text-base font-extrabold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
   {
     variants: {
       variant: {
         primary:
-          "bg-accent text-white shadow-sm hover:bg-[#c86848] active:scale-[0.98]",
-        soft: "bg-accent-soft text-fg hover:bg-[#efd9c7] active:scale-[0.98]",
+          "bg-accent text-white border-2 border-fg shadow-comic hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-comic-sm active:translate-x-[2px] active:translate-y-[2px] active:shadow-comic-pressed",
+        soft:
+          "bg-accent-soft text-fg border-2 border-fg shadow-comic-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-comic-pressed active:translate-x-[2px] active:translate-y-[2px] active:shadow-none",
+        bot:
+          "bg-bot text-white border-2 border-fg shadow-comic hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-comic-sm active:translate-x-[2px] active:translate-y-[2px] active:shadow-comic-pressed",
         ghost: "text-fg hover:bg-accent-soft",
-        outline: "border-2 border-fg/20 bg-transparent hover:bg-accent-soft",
+        outline:
+          "border-2 border-fg bg-white/70 shadow-comic-sm hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-comic-pressed",
       },
       size: {
         default: "h-12 px-5",
