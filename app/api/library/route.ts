@@ -61,10 +61,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ library, progress });
   } catch (err) {
     console.error("[library GET] error:", err);
-    return NextResponse.json(
-      { error: "Bibliothek konnte nicht geladen werden." },
-      { status: 500 },
-    );
+    const message =
+      err instanceof Error && err.message.includes("Redis ist nicht konfiguriert")
+        ? "Server ist noch nicht fertig eingerichtet: Upstash Redis fehlt. (Vercel → Storage → Upstash for Redis anlegen.)"
+        : "Bibliothek konnte nicht geladen werden.";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
