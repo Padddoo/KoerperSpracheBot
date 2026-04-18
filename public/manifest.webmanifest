@@ -1,0 +1,17 @@
+{
+  "name": "Fred lernt",
+  "short_name": "Fred lernt",
+  "description": "Dein freundlicher Lern-Coach zum Sprechen.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FAF7F2",
+  "theme_color": "#FAF7F2",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

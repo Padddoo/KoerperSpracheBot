@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #faf7f2;
+  --fg: #2d3a2e;
+  --accent: #d97757;
+  --accent-soft: #f5e6dc;
+  --user-bubble: #2d3a2e;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--fg);
+  -webkit-font-smoothing: antialiased;
+  font-family: "Nunito", system-ui, sans-serif;
+}
+
+@layer utilities {
+  .touch-target {
+    min-height: 60px;
+    min-width: 60px;
+  }
+}
