@@ -1,36 +1,56 @@
 /**
- * Serial audio queue: fetches TTS for each sentence and plays them in order.
- * Subsequent sentences' TTS requests fire in parallel (browser cache / server
- * handles progressive download), but playback is strictly sequential.
+ * Serial audio queue using Web Audio API (AudioContext + BufferSource).
+ *
+ * Why not HTMLAudioElement: on iOS Safari a newly-constructed <audio>
+ * element outside a user gesture is blocked — after turn 1, subsequent
+ * TTS playback silently fails. AudioContext remains "unlocked" for the
+ * lifetime of the tab once it has been resumed inside a user gesture.
+ *
+ * Each sentence's MP3 is fetched + decoded in parallel (pre-warm),
+ * but playback happens strictly sequentially via the internal chain.
  */
 export class AudioQueue {
   private chain: Promise<void> = Promise.resolve();
-  private elements: HTMLAudioElement[] = [];
   private stopped = false;
+  private activeSources: AudioBufferSourceNode[] = [];
+
+  constructor(private ctx: AudioContext) {}
 
   enqueue(text: string): void {
     if (this.stopped) return;
-    // Pre-warm the TTS fetch immediately (browser-initiated request)
     const url = `/api/tts?text=${encodeURIComponent(text)}`;
-    const audio = new Audio(url);
-    audio.preload = "auto";
-    this.elements.push(audio);
-    this.chain = this.chain.then(() => this.play(audio));
+    // Fetch + decode kick off immediately (parallel pre-warm)
+    const bufferPromise = fetch(url)
+      .then((res) => {
+        if (!res.ok) throw new Error(`TTS HTTP ${res.status}`);
+        return res.arrayBuffer();
+      })
+      .then((buf) => this.ctx.decodeAudioData(buf));
+    this.chain = this.chain.then(() => this.playOne(bufferPromise));
   }
 
-  private play(audio: HTMLAudioElement): Promise<void> {
-    if (this.stopped) return Promise.resolve();
-    return new Promise((resolve) => {
-      let done = false;
-      const finish = () => {
-        if (done) return;
-        done = true;
-        resolve();
-      };
-      audio.onended = finish;
-      audio.onerror = finish;
-      audio.play().catch(finish);
-    });
+  private async playOne(
+    bufferPromise: Promise<AudioBuffer>,
+  ): Promise<void> {
+    if (this.stopped) return;
+    try {
+      const buffer = await bufferPromise;
+      if (this.stopped) return;
+      await new Promise<void>((resolve) => {
+        const source = this.ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(this.ctx.destination);
+        this.activeSources.push(source);
+        const finish = () => {
+          this.activeSources = this.activeSources.filter((s) => s !== source);
+          resolve();
+        };
+        source.onended = finish;
+        source.start(0);
+      });
+    } catch (err) {
+      console.warn("TTS decode/play failed:", err);
+    }
   }
 
   async waitForComplete(): Promise<void> {
@@ -39,13 +59,12 @@ export class AudioQueue {
 
   stop(): void {
     this.stopped = true;
-    for (const a of this.elements) {
+    for (const s of this.activeSources) {
       try {
-        a.pause();
-        a.src = "";
+        s.stop();
       } catch {}
     }
-    this.elements = [];
+    this.activeSources = [];
     this.chain = Promise.resolve();
   }
 }
