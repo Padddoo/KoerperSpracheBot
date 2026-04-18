@@ -5,8 +5,19 @@ import { RefreshCw, FileCheck2 } from "lucide-react";
 import { UploadZone } from "@/components/upload-zone";
 import { MicButton, type MicState } from "@/components/mic-button";
 import { ChatView } from "@/components/chat-view";
+import { ProgressPill } from "@/components/progress-pill";
 import { Button } from "@/components/ui/button";
-import type { Message, SessionInfo } from "@/types";
+import type {
+  Message,
+  ProgressForMaterial,
+  SessionInfo,
+  Verdict,
+} from "@/types";
+import {
+  clearProgress,
+  loadProgress,
+  recordTurn,
+} from "@/lib/progress";
 
 const STORAGE_KEY = "fred-lernt.session.v1";
 const MAX_RECORDING_MS = 60_000;
@@ -36,6 +47,8 @@ export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [micState, setMicState] = useState<MicState>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<ProgressForMaterial>({});
+  const [currentTopic, setCurrentTopic] = useState<string | null>(null);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -49,9 +62,15 @@ export default function Home() {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as PersistedState;
-        if (parsed.session?.sessionId) {
+        if (parsed.session?.sessionId && parsed.session?.materialHash) {
           setSession(parsed.session);
           setMessages(parsed.messages ?? []);
+          setProgress(loadProgress(parsed.session.materialHash));
+          // Setze das zuletzt aktive Thema, falls vorhanden
+          const lastAssistant = [...(parsed.messages ?? [])]
+            .reverse()
+            .find((m) => m.role === "assistant" && m.meta?.topic);
+          setCurrentTopic(lastAssistant?.meta?.topic ?? null);
         }
       }
     } catch {
@@ -72,8 +91,16 @@ export default function Home() {
     localStorage.removeItem(STORAGE_KEY);
     setSession(null);
     setMessages([]);
+    setProgress({});
+    setCurrentTopic(null);
     setError(null);
   }, []);
+
+  const resetProgress = useCallback(() => {
+    if (!session) return;
+    clearProgress(session.materialHash);
+    setProgress({});
+  }, [session]);
 
   const speak = useCallback(async (text: string) => {
     try {
@@ -136,7 +163,10 @@ export default function Home() {
           return;
         }
 
-        const nextHistory = [...messages, { role: "user" as const, content: userText }];
+        const nextHistory: Message[] = [
+          ...messages,
+          { role: "user", content: userText },
+        ];
         setMessages(nextHistory);
 
         const cRes = await fetch("/api/chat", {
@@ -144,6 +174,7 @@ export default function Home() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             material: session.material,
+            topics: session.topics,
             userMessage: userText,
             history: messages,
           }),
@@ -152,12 +183,28 @@ export default function Home() {
           const data = await cRes.json().catch(() => ({}));
           throw new Error(data.error || "Chat fehlgeschlagen");
         }
-        const { assistantMessage } = (await cRes.json()) as {
+        const {
+          assistantMessage,
+          topic,
+          verdict,
+        } = (await cRes.json()) as {
           assistantMessage: string;
+          topic: string;
+          verdict: Verdict;
         };
+
+        // Fortschritt aktualisieren
+        const updated = recordTurn(session.materialHash, topic, verdict);
+        setProgress(updated);
+        setCurrentTopic(topic);
+
         setMessages([
           ...nextHistory,
-          { role: "assistant" as const, content: assistantMessage },
+          {
+            role: "assistant",
+            content: assistantMessage,
+            meta: { topic, verdict },
+          },
         ]);
 
         await speak(assistantMessage);
@@ -238,6 +285,8 @@ export default function Home() {
           onUploaded={(info) => {
             setSession(info);
             setMessages([]);
+            setProgress(loadProgress(info.materialHash));
+            setCurrentTopic(null);
           }}
         />
       </main>
@@ -265,11 +314,18 @@ export default function Home() {
         </Button>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-4 pb-40">
+      <ProgressPill
+        currentTopic={currentTopic}
+        topics={session.topics}
+        progress={progress}
+        onReset={resetProgress}
+      />
+
+      <div className="flex-1 overflow-y-auto px-4 pb-40 pt-2">
         <div className="mx-auto w-full max-w-xl">
           <ChatView
             messages={messages}
-            hint="Tippe den Mikrofon-Knopf unten und leg los."
+            hint={`Tippe den Mikrofon-Knopf und leg los. Du kannst auch sagen: „Lass uns ${session.topics[0] ?? "dieses Thema"} üben."`}
           />
         </div>
       </div>
