@@ -29,7 +29,6 @@ import {
   upsertEntry,
 } from "@/lib/library";
 
-const STORAGE_KEY = "fred-lernt.session.v1";
 const CONTINUOUS_KEY = "fred-lernt.continuous.v1";
 const MAX_RECORDING_MS = 60_000;
 
@@ -37,11 +36,6 @@ const MAX_RECORDING_MS = 60_000;
 const SILENCE_THRESHOLD = 18; // 0..255 avg frequency-byte
 const SILENCE_DURATION_MS = 1500;
 const MIN_RECORDING_MS = 800;
-
-interface PersistedState {
-  session: SessionInfo;
-  messages: Message[];
-}
 
 function pickMimeType(): string {
   if (typeof MediaRecorder === "undefined") return "";
@@ -87,43 +81,13 @@ export default function Home() {
   }, [continuousMode]);
 
   useEffect(() => {
-    const lib = loadLibrary();
-    setLibrary(lib);
+    setLibrary(loadLibrary());
 
     try {
       const rawCont = localStorage.getItem(CONTINUOUS_KEY);
       if (rawCont === "1") setContinuousMode(true);
     } catch {}
-
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as PersistedState;
-        if (parsed.session?.sessionId && parsed.session?.materialHash) {
-          setSession(parsed.session);
-          setMessages(parsed.messages ?? []);
-          setProgress(loadProgress(parsed.session.materialHash));
-          const lastAssistant = [...(parsed.messages ?? [])]
-            .reverse()
-            .find((m) => m.role === "assistant" && m.meta?.topic);
-          setCurrentTopic(lastAssistant?.meta?.topic ?? null);
-
-          if (!lib.some((e) => e.materialHash === parsed.session.materialHash)) {
-            setLibrary(upsertEntry(sessionToEntry(parsed.session)));
-          }
-        }
-      }
-    } catch {}
   }, []);
-
-  useEffect(() => {
-    if (session) {
-      localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({ session, messages } satisfies PersistedState),
-      );
-    }
-  }, [session, messages]);
 
   const teardownAudioContext = useCallback(() => {
     if (audioContextRef.current) {
@@ -133,7 +97,6 @@ export default function Home() {
   }, []);
 
   const backToLibrary = useCallback(() => {
-    localStorage.removeItem(STORAGE_KEY);
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current = null;
