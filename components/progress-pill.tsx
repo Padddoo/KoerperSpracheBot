@@ -28,7 +28,7 @@ export function ProgressPill({ currentTopic, topics, progress, onReset }: Props)
 
   return (
     <div className="mx-auto w-full max-w-xl px-4 pt-3">
-      <div className="rounded-2xl border border-fg/10 bg-white/80 shadow-sm">
+      <div className="rounded-2xl border-2 border-fg bg-white shadow-comic-sm">
         <button
           type="button"
           onClick={() => setExpanded((e) => !e)}
@@ -56,7 +56,7 @@ export function ProgressPill({ currentTopic, topics, progress, onReset }: Props)
         </button>
 
         {expanded && (
-          <div className="border-t border-fg/10 px-4 py-3">
+          <div className="border-t-2 border-fg px-4 py-3">
             <div className="flex flex-col gap-2">
               {topics.map((t) => {
                 const s = progress[t];

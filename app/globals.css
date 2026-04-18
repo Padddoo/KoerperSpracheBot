@@ -3,11 +3,12 @@
 @tailwind utilities;
 
 :root {
-  --bg: #faf7f2;
-  --fg: #2d3a2e;
-  --accent: #d97757;
-  --accent-soft: #f5e6dc;
-  --user-bubble: #2d3a2e;
+  --bg: #fdf6ec;
+  --fg: #141414;
+  --accent: #ff6b35;
+  --accent-soft: #ffe3d0;
+  --bot: #14b8a6;
+  --bot-soft: #ccfbf1;
 }
 
 html,
@@ -18,9 +19,24 @@ body {
   font-family: "Nunito", system-ui, sans-serif;
 }
 
+h1,
+h2,
+h3,
+.font-display {
+  font-family: "Kalam", "Comic Sans MS", cursive;
+}
+
 @layer utilities {
   .touch-target {
     min-height: 60px;
     min-width: 60px;
+  }
+  /* Leichter Papier-Look */
+  .paper {
+    background-color: #fdf6ec;
+    background-image:
+      radial-gradient(circle at 20% 30%, rgba(0, 0, 0, 0.015) 1px, transparent 1px),
+      radial-gradient(circle at 70% 80%, rgba(0, 0, 0, 0.015) 1px, transparent 1px);
+    background-size: 40px 40px;
   }
 }

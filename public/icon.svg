@@ -1,7 +1,25 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="96" fill="#FAF7F2"/>
-  <circle cx="256" cy="230" r="120" fill="#D97757"/>
-  <path d="M256 360v60" stroke="#2D3A2E" stroke-width="20" stroke-linecap="round"/>
-  <path d="M196 420h120" stroke="#2D3A2E" stroke-width="20" stroke-linecap="round"/>
-  <rect x="226" y="170" width="60" height="100" rx="30" fill="#FAF7F2"/>
+  <rect width="512" height="512" rx="96" fill="#FDF6EC"/>
+  <!-- Antenne -->
+  <line x1="256" y1="140" x2="256" y2="80" stroke="#141414" stroke-width="14" stroke-linecap="round"/>
+  <circle cx="256" cy="70" r="22" fill="#FF6B35" stroke="#141414" stroke-width="10"/>
+  <!-- Ohren -->
+  <rect x="90" y="230" width="34" height="80" rx="12" fill="#94A3B8" stroke="#141414" stroke-width="10"/>
+  <rect x="388" y="230" width="34" height="80" rx="12" fill="#94A3B8" stroke="#141414" stroke-width="10"/>
+  <!-- Kopf -->
+  <rect x="122" y="140" width="268" height="220" rx="40" fill="#CCFBF1" stroke="#141414" stroke-width="14"/>
+  <!-- Augen -->
+  <circle cx="200" cy="230" r="24" fill="#141414"/>
+  <circle cx="312" cy="230" r="24" fill="#141414"/>
+  <circle cx="210" cy="220" r="8" fill="#fff"/>
+  <circle cx="322" cy="220" r="8" fill="#fff"/>
+  <!-- Mund -->
+  <path d="M190 300 Q256 335 322 300" stroke="#141414" stroke-width="14" stroke-linecap="round" fill="none"/>
+  <!-- Schrauben -->
+  <circle cx="148" cy="190" r="7" fill="#141414"/>
+  <circle cx="364" cy="190" r="7" fill="#141414"/>
+  <!-- Hals -->
+  <rect x="220" y="360" width="72" height="28" fill="#94A3B8" stroke="#141414" stroke-width="10"/>
+  <!-- Körper (Brust-Ansatz) -->
+  <rect x="160" y="388" width="192" height="56" rx="14" fill="#FF6B35" stroke="#141414" stroke-width="10"/>
 </svg>

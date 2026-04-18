@@ -78,12 +78,13 @@ export function LibraryPicker({
               <div
                 key={entry.materialHash}
                 className={cn(
-                  "rounded-2xl border border-fg/10 bg-white/70 shadow-sm transition-all",
-                  !isEditing && "hover:shadow-md",
+                  "rounded-2xl border-2 border-fg bg-white shadow-comic-sm transition-all",
+                  !isEditing &&
+                    "hover:-translate-y-[1px] hover:shadow-comic",
                 )}
               >
                 <div className="flex items-start gap-3 p-4">
-                  <div className="flex h-11 w-11 flex-none items-center justify-center rounded-xl bg-accent-soft text-accent">
+                  <div className="flex h-11 w-11 flex-none items-center justify-center rounded-xl border-2 border-fg bg-accent-soft text-fg">
                     <FileText className="h-5 w-5" />
                   </div>
                   <button
