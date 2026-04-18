@@ -147,12 +147,48 @@ export default function Home() {
     setMessages([]);
   }, []);
 
-  const teardownAudioContext = useCallback(() => {
+  const analyserSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+
+  /**
+   * Create-or-reuse a shared AudioContext. MUST be called inside a user
+   * gesture first time, so iOS Safari unlocks audio playback for the
+   * lifetime of the tab. Context is resumed if suspended.
+   */
+  const ensureAudioContext = useCallback((): AudioContext | null => {
+    try {
+      if (!audioContextRef.current) {
+        const AudioCtx =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext: typeof AudioContext })
+            .webkitAudioContext;
+        if (!AudioCtx) return null;
+        audioContextRef.current = new AudioCtx();
+      }
+      if (audioContextRef.current.state === "suspended") {
+        audioContextRef.current.resume().catch(() => {});
+      }
+      return audioContextRef.current;
+    } catch (err) {
+      console.warn("AudioContext nicht verfügbar:", err);
+      return null;
+    }
+  }, []);
+
+  const disconnectAnalyser = useCallback(() => {
+    try {
+      analyserSourceRef.current?.disconnect();
+    } catch {}
+    analyserSourceRef.current = null;
+  }, []);
+
+  /** Fully close the AudioContext — only on unmount / backToLibrary. */
+  const closeAudioContext = useCallback(() => {
+    disconnectAnalyser();
     if (audioContextRef.current) {
       audioContextRef.current.close().catch(() => {});
       audioContextRef.current = null;
     }
-  }, []);
+  }, [disconnectAnalyser]);
 
   const stopEverything = useCallback(() => {
     userCancelledRef.current = true;
@@ -175,22 +211,23 @@ export default function Home() {
     }
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
-    teardownAudioContext();
+    disconnectAnalyser();
     if (stopTimerRef.current) {
       window.clearTimeout(stopTimerRef.current);
       stopTimerRef.current = null;
     }
     setMicState("idle");
-  }, [teardownAudioContext]);
+  }, [disconnectAnalyser]);
 
   const backToLibrary = useCallback(() => {
     stopEverything();
+    closeAudioContext();
     setSession(null);
     setMessages([]);
     setCurrentTopic(null);
     setError(null);
     setShowUploadView(false);
-  }, [stopEverything]);
+  }, [stopEverything, closeAudioContext]);
 
   const sessionProgress: ProgressForMaterial = session
     ? (progressAll[session.materialHash] ?? {})
@@ -342,7 +379,13 @@ export default function Home() {
 
         // SSE-Reader: satzweise TTS starten, sobald Sätze reinkommen
         setMicState("speaking");
-        const queue = new AudioQueue();
+        const ctx = ensureAudioContext();
+        if (!ctx) {
+          throw new Error(
+            "Audio auf diesem Gerät nicht verfügbar. Bitte Seite neu laden.",
+          );
+        }
+        const queue = new AudioQueue(ctx);
         audioQueueRef.current = queue;
 
         const reader = cRes.body.getReader();
@@ -432,13 +475,17 @@ export default function Home() {
         setMicState("idle");
       }
     },
-    [familyCode, messages, progressAll, session],
+    [familyCode, messages, progressAll, session, ensureAudioContext],
   );
 
   const startRecording = useCallback(async () => {
     try {
       setError(null);
       userCancelledRef.current = false;
+      // iOS Safari-Wichtig: AudioContext im Gesture-Scope erstellen
+      // und entsperren, bevor wir auf getUserMedia awaiten.
+      ensureAudioContext();
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       const mimeType = pickMimeType();
@@ -455,7 +502,7 @@ export default function Home() {
         const blob = new Blob(chunksRef.current, { type: effectiveMime });
         streamRef.current?.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
-        teardownAudioContext();
+        disconnectAnalyser();
         if (stopTimerRef.current) {
           window.clearTimeout(stopTimerRef.current);
           stopTimerRef.current = null;
@@ -476,13 +523,10 @@ export default function Home() {
 
       if (continuousModeRef.current) {
         try {
-          const AudioCtx =
-            window.AudioContext ||
-            (window as unknown as { webkitAudioContext: typeof AudioContext })
-              .webkitAudioContext;
-          const audioContext = new AudioCtx();
-          audioContextRef.current = audioContext;
+          const audioContext = audioContextRef.current;
+          if (!audioContext) throw new Error("no audio context");
           const source = audioContext.createMediaStreamSource(stream);
+          analyserSourceRef.current = source;
           const analyser = audioContext.createAnalyser();
           analyser.fftSize = 512;
           source.connect(analyser);
@@ -532,7 +576,7 @@ export default function Home() {
       }
       setMicState("idle");
     }
-  }, [handleAudioBlob, teardownAudioContext]);
+  }, [handleAudioBlob, ensureAudioContext, disconnectAnalyser]);
 
   useEffect(() => {
     startRecordingRef.current = startRecording;
@@ -565,10 +609,10 @@ export default function Home() {
 
   useEffect(
     () => () => {
-      teardownAudioContext();
+      closeAudioContext();
       streamRef.current?.getTracks().forEach((t) => t.stop());
     },
-    [teardownAudioContext],
+    [closeAudioContext],
   );
 
   // --- Views ---
