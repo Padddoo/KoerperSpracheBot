@@ -630,7 +630,7 @@ export default function Home() {
           <div className="mx-auto w-full max-w-xl">
             <ChatView
               messages={messages}
-              hint={`Tippe den Mikrofon-Knopf und leg los. Du kannst auch sagen: „Lass uns ${session.topics[0] ?? "dieses Thema"} üben."`}
+              hint={`Tippe den Mikrofon-Knopf und leg los. Du darfst Fred auch was fragen — z.B. „Kannst Du mir das erklären?" — oder das Thema wechseln mit „Lass uns ${session.topics[0] ?? "dieses Thema"} üben."`}
             />
           </div>
         </div>

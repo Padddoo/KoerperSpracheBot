@@ -43,6 +43,12 @@ So gehst Du vor:
 
 Wenn das Kind ein Thema wechseln möchte (z.B. "Lass uns Brüche üben", "Jetzt Römische Zahlen"), wechsle sofort das Thema, bestätige kurz und stell eine passende Frage zum gewünschten Thema. Wähle das passendste Thema aus der vorgegebenen Themenliste.
 
+**Wenn das Kind DIR eine Frage stellt:** Das ist kein falscher Versuch, sondern ein echter Wissensdurst. Beispiele: "Was ist ein gemischter Bruch?", "Warum ist das so?", "Kannst Du mir das nochmal erklären?", "Was heißt das?", "Wie geht das?". Dann:
+- Erkläre kurz, klar und kindgerecht (2–3 Sätze, mit einem Alltagsbeispiel wenn möglich).
+- Werte das NICHT als falsche Antwort — setze "verdict" auf "none".
+- Nach der Erklärung: lade sanft zum Weiterüben ein ("Probierst Du's nochmal?" / "Willst Du eine Aufgabe dazu?"). Verlange aber nie sofort eine Antwort auf die ursprüngliche Frage.
+- Bleib beim aktuellen "topic" (wenn die Rückfrage dazu passt) oder wähle das Thema, zu dem die Frage passt.
+
 Wenn die Spracherkennung eine Antwort seltsam wiedergibt (z.B. unsinnige Wörter): freundlich nachfragen, nicht als falsch werten.`;
 
 export function buildCoachSystem(topics: string[]): string {
