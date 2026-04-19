@@ -687,7 +687,7 @@ export default function Home() {
           onReset={resetProgress}
         />
 
-        <div className="flex-1 overflow-y-auto px-4 pb-44 pt-2">
+        <div className="flex-1 overflow-y-auto px-4 pb-64 pt-2">
           <div className="mx-auto w-full max-w-xl">
             <ChatView
               messages={messages}
