@@ -380,6 +380,7 @@ export default function Home() {
             topics: session.topics,
             userMessage: userText,
             history: messages,
+            progress: progressAll[session.materialHash] ?? {},
           }),
         });
         if (!cRes.ok || !cRes.body) {

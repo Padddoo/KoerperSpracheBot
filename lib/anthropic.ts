@@ -59,6 +59,24 @@ Fragen, die NICHTS mit dem Material zu tun haben (z.B. Mathe-Stunde, Fred fragt 
 
 Wenn die Spracherkennung eine Antwort seltsam wiedergibt (z.B. unsinnige Wörter): freundlich nachfragen, nicht als falsch werten.`;
 
+export interface TopicStatsLike {
+  correct: number;
+  partial: number;
+  incorrect: number;
+}
+
+function formatProgressLine(topic: string, s: TopicStatsLike | undefined): string {
+  if (!s) return `- ${topic}: noch nie gefragt`;
+  const total = s.correct + s.partial + s.incorrect;
+  if (total === 0) return `- ${topic}: noch nie gefragt`;
+  const ratio = s.correct / total;
+  let tag = "";
+  if (s.correct >= 3 && ratio >= 0.8) tag = " — GEMEISTERT";
+  else if (total >= 2 && ratio < 0.5) tag = " — SCHWACH, öfter üben";
+  return `- ${topic}: ${s.correct}× richtig, ${s.partial}× teilweise, ${s.incorrect}× falsch${tag}`;
+}
+
+/** Stabiler System-Teil — änderungsarm, gut cacheable. */
 export function buildCoachSystem(topics: string[]): string {
   const topicList = topics.map((t) => `- ${t}`).join("\n");
   return `${COACH_BASE_PROMPT}
@@ -77,6 +95,26 @@ ${topicList}
   - "partial" = teilweise richtig / fast
   - "incorrect" = falsch
   - "none" = keine Bewertung möglich (erste Begrüßung, Kind fragt etwas, Themenwechsel-Wunsch, unverständliche Antwort)`;
+}
+
+/**
+ * Turn-volatile Progress-Block.
+ * Wird als separater System-Block NACH dem (gecachten) Material-Block
+ * angehängt — dadurch bleibt das Material-Prompt-Caching intakt.
+ */
+export function buildProgressBlock(
+  topics: string[],
+  progress: Record<string, TopicStatsLike> | undefined,
+): string | null {
+  if (!progress || Object.keys(progress).length === 0) return null;
+  const lines = topics.map((t) => formatProgressLine(t, progress[t])).join("\n");
+  return `**Freds bisheriger Fortschritt pro Thema:**
+${lines}
+
+**Wie Du das nutzt:**
+- Wenn Fred KEIN bestimmtes Thema vorgibt, bevorzuge beim Fragenwählen die noch-nie-gefragten und schwachen Themen. Gemeisterte Themen fragst Du nur selten zur Wiederholung.
+- Wenn Fred bei einem Thema gerade den Mastery-Schwellwert erreicht (3× richtig hintereinander), erwähne das kurz und freudig ("Das Thema sitzt richtig gut — willst Du zu einem anderen wechseln?").
+- Bleibe bei Fred's Wunsch, wenn er ein bestimmtes Thema möchte — auch wenn es als gemeistert markiert ist.`;
 }
 
 // Kept for backward compat if referenced elsewhere

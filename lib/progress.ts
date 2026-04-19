@@ -31,3 +31,15 @@ export function totalsForMaterial(
   }
   return { correct, partial, incorrect };
 }
+
+export type MasteryStatus = "mastered" | "in_progress" | "untouched";
+
+/** "mastered" ab 3 richtigen Antworten mit Erfolgsquote ≥ 80%. */
+export function masteryOf(stats: TopicStats | undefined): MasteryStatus {
+  if (!stats) return "untouched";
+  const total = stats.correct + stats.partial + stats.incorrect;
+  if (total === 0) return "untouched";
+  if (stats.correct >= 3 && stats.correct / total >= 0.8) return "mastered";
+  return "in_progress";
+}
+
