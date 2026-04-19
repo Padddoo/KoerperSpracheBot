@@ -100,6 +100,22 @@ export async function renameEntryRemote(
   return data.library;
 }
 
+export async function reextractTopicsRemote(
+  code: string,
+  materialHash: string,
+): Promise<LibraryEntry[]> {
+  const res = await fetch(
+    `/api/library/${encodeURIComponent(materialHash)}?code=${encodeURIComponent(code)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "reextract" }),
+    },
+  );
+  const data = await handleResponse<LibraryResponse>(res);
+  return data.library;
+}
+
 export async function saveProgressRemote(
   code: string,
   materialHash: string,

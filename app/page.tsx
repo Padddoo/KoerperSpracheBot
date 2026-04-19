@@ -32,6 +32,7 @@ import {
   deleteEntryRemote,
   fetchAll,
   loadFamilyCode,
+  reextractTopicsRemote,
   renameEntryRemote,
   saveFamilyCode,
   saveProgressRemote,
@@ -305,6 +306,22 @@ export default function Home() {
         const data = await deleteEntryRemote(familyCode, entry.materialHash);
         setLibrary(data.library);
         setProgressAll(data.progress);
+      } catch (err) {
+        console.error(err);
+      }
+    },
+    [familyCode],
+  );
+
+  const handleReextract = useCallback(
+    async (entry: LibraryEntry) => {
+      if (!familyCode) return;
+      try {
+        const nextLib = await reextractTopicsRemote(
+          familyCode,
+          entry.materialHash,
+        );
+        setLibrary(nextLib);
       } catch (err) {
         console.error(err);
       }
@@ -795,6 +812,7 @@ export default function Home() {
       onNewUpload={() => setShowUploadView(true)}
       onDelete={handleDelete}
       onRename={handleRename}
+      onReextract={handleReextract}
       onChangeCode={changeCode}
     />
   );
