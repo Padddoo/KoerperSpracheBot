@@ -1,9 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronUp, RotateCcw } from "lucide-react";
+import {
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Circle,
+  CircleDot,
+  RotateCcw,
+} from "lucide-react";
 import type { ProgressForMaterial } from "@/types";
-import { totalsForMaterial } from "@/lib/progress";
+import { masteryOf, totalsForMaterial } from "@/lib/progress";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -65,6 +72,7 @@ export function ProgressPill({ currentTopic, topics, progress, onReset }: Props)
                 const i = s?.incorrect ?? 0;
                 const total = c + p + i;
                 const pct = total === 0 ? 0 : (c + 0.5 * p) / total;
+                const status = masteryOf(s);
                 return (
                   <div
                     key={t}
@@ -73,11 +81,19 @@ export function ProgressPill({ currentTopic, topics, progress, onReset }: Props)
                       currentTopic === t && "font-semibold",
                     )}
                   >
-                    <span className="truncate text-sm text-fg/80">{t}</span>
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <StatusIcon status={status} />
+                      <span className="truncate text-sm text-fg/80">{t}</span>
+                    </div>
                     <div className="flex items-center gap-2 text-xs tabular-nums text-fg/70">
                       <div className="h-1.5 w-20 rounded-full bg-fg/10">
                         <div
-                          className="h-1.5 rounded-full bg-accent"
+                          className={cn(
+                            "h-1.5 rounded-full",
+                            status === "mastered"
+                              ? "bg-emerald-600"
+                              : "bg-accent",
+                          )}
                           style={{ width: `${Math.round(pct * 100)}%` }}
                         />
                       </div>
@@ -103,6 +119,35 @@ export function ProgressPill({ currentTopic, topics, progress, onReset }: Props)
         )}
       </div>
     </div>
+  );
+}
+
+function StatusIcon({
+  status,
+}: {
+  status: "mastered" | "in_progress" | "untouched";
+}) {
+  if (status === "mastered") {
+    return (
+      <CheckCircle2
+        className="h-4 w-4 flex-none text-emerald-600"
+        aria-label="Gemeistert"
+      />
+    );
+  }
+  if (status === "in_progress") {
+    return (
+      <CircleDot
+        className="h-4 w-4 flex-none text-accent"
+        aria-label="Im Training"
+      />
+    );
+  }
+  return (
+    <Circle
+      className="h-4 w-4 flex-none text-fg/30"
+      aria-label="Noch nicht geübt"
+    />
   );
 }
 

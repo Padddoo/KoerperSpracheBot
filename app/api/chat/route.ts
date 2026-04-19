@@ -1,11 +1,17 @@
 import { NextRequest } from "next/server";
-import { anthropic, CLAUDE_MODEL, buildCoachSystem } from "@/lib/anthropic";
+import {
+  anthropic,
+  CLAUDE_MODEL,
+  buildCoachSystem,
+  buildProgressBlock,
+} from "@/lib/anthropic";
+import type Anthropic from "@anthropic-ai/sdk";
 import {
   extractSpokenPartial,
   splitSentences,
   tryParseCoachOutput,
 } from "@/lib/coach-parse";
-import type { Message, Verdict } from "@/types";
+import type { Message, ProgressForMaterial, Verdict } from "@/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -15,6 +21,7 @@ interface ChatRequest {
   topics: string[];
   userMessage: string;
   history: Message[];
+  progress?: ProgressForMaterial;
 }
 
 function logCostEstimate(usage: {
@@ -45,7 +52,7 @@ function sseEncode(obj: unknown): string {
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as ChatRequest;
-    const { material, topics, userMessage, history } = body;
+    const { material, topics, userMessage, history, progress } = body;
 
     if (!material || !userMessage) {
       return new Response(
@@ -71,17 +78,25 @@ export async function POST(req: NextRequest) {
         let emittedSpokenLength = 0;
 
         try {
+          // Stabile Blöcke vor dem Cache-Breakpoint, volatiler
+          // Progress-Block danach → Material-Caching bleibt intakt.
+          const systemBlocks: Anthropic.TextBlockParam[] = [
+            { type: "text", text: buildCoachSystem(safeTopics) },
+            {
+              type: "text",
+              text: `<lernmaterial>\n${material}\n</lernmaterial>`,
+              cache_control: { type: "ephemeral" },
+            },
+          ];
+          const progressText = buildProgressBlock(safeTopics, progress);
+          if (progressText) {
+            systemBlocks.push({ type: "text", text: progressText });
+          }
+
           const stream = anthropic().messages.stream({
             model: CLAUDE_MODEL,
             max_tokens: 500,
-            system: [
-              { type: "text", text: buildCoachSystem(safeTopics) },
-              {
-                type: "text",
-                text: `<lernmaterial>\n${material}\n</lernmaterial>`,
-                cache_control: { type: "ephemeral" },
-              },
-            ],
+            system: systemBlocks,
             messages,
           });
 
