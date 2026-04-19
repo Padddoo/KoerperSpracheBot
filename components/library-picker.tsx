@@ -169,64 +169,73 @@ export function LibraryPicker({
                     )}
                   </div>
                 </div>
-                {!isEditing && entry.topics.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => onSelect(entry)}
-                    className="w-full border-t-2 border-fg/10 px-4 py-3 text-left"
-                  >
-                    <ul className="grid grid-cols-1 gap-1 sm:grid-cols-2">
-                      {entry.topics.map((t) => {
-                        const status = masteryOf(p[t]);
-                        return (
-                          <li
-                            key={t}
-                            className="flex items-center gap-1.5 text-sm text-fg/80"
-                          >
-                            {status === "mastered" ? (
-                              <CheckCircle2 className="h-3.5 w-3.5 flex-none text-emerald-600" />
-                            ) : status === "in_progress" ? (
-                              <CircleDot className="h-3.5 w-3.5 flex-none text-accent" />
-                            ) : (
-                              <Circle className="h-3.5 w-3.5 flex-none text-fg/30" />
-                            )}
-                            <span className="truncate">{t}</span>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </button>
-                )}
-                {!isEditing && entry.topics.length === 0 && onReextract && (
-                  <div className="w-full border-t-2 border-fg/10 px-4 py-3">
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        if (extractingHash) return;
-                        setExtractingHash(entry.materialHash);
-                        try {
-                          await onReextract(entry);
-                        } finally {
-                          setExtractingHash(null);
-                        }
-                      }}
-                      disabled={extractingHash === entry.materialHash}
-                      className="inline-flex items-center gap-1.5 rounded-lg border-2 border-fg/20 px-2 py-1 text-xs font-semibold text-fg/70 hover:bg-accent-soft hover:text-fg disabled:opacity-60"
-                    >
-                      {extractingHash === entry.materialHash ? (
-                        <>
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          Analysiere…
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="h-3.5 w-3.5" />
-                          Themen erkennen
-                        </>
+                {!isEditing && (() => {
+                  const hasRealTopics =
+                    entry.topics.length > 0 &&
+                    !(entry.topics.length === 1 && entry.topics[0] === "Allgemein");
+                  return (
+                    <div className="w-full border-t-2 border-fg/10">
+                      {hasRealTopics && (
+                        <button
+                          type="button"
+                          onClick={() => onSelect(entry)}
+                          className="w-full px-4 pb-2 pt-3 text-left"
+                        >
+                          <ul className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                            {entry.topics.map((t) => {
+                              const status = masteryOf(p[t]);
+                              return (
+                                <li
+                                  key={t}
+                                  className="flex items-center gap-1.5 text-sm text-fg/80"
+                                >
+                                  {status === "mastered" ? (
+                                    <CheckCircle2 className="h-3.5 w-3.5 flex-none text-emerald-600" />
+                                  ) : status === "in_progress" ? (
+                                    <CircleDot className="h-3.5 w-3.5 flex-none text-accent" />
+                                  ) : (
+                                    <Circle className="h-3.5 w-3.5 flex-none text-fg/30" />
+                                  )}
+                                  <span className="truncate">{t}</span>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </button>
                       )}
-                    </button>
-                  </div>
-                )}
+                      {onReextract && (
+                        <div className="px-4 pb-3 pt-2">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (extractingHash) return;
+                              setExtractingHash(entry.materialHash);
+                              try {
+                                await onReextract(entry);
+                              } finally {
+                                setExtractingHash(null);
+                              }
+                            }}
+                            disabled={extractingHash === entry.materialHash}
+                            className="inline-flex items-center gap-1.5 rounded-lg border-2 border-fg/20 px-2 py-1 text-xs font-semibold text-fg/70 hover:bg-accent-soft hover:text-fg disabled:opacity-60"
+                          >
+                            {extractingHash === entry.materialHash ? (
+                              <>
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                Analysiere…
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="h-3.5 w-3.5" />
+                                {hasRealTopics ? "Themen neu erkennen" : "Themen erkennen"}
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}
