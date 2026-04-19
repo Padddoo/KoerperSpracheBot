@@ -162,9 +162,19 @@ export default function Home() {
           (window as unknown as { webkitAudioContext: typeof AudioContext })
             .webkitAudioContext;
         if (!AudioCtx) return null;
-        audioContextRef.current = new AudioCtx();
+        const ctx = new AudioCtx();
+        audioContextRef.current = ctx;
+        // Prime mit stiller Mini-Buffer — hilft auf iOS/Chrome mobile
+        // den Output-Graph vollständig zu initialisieren.
+        try {
+          const silent = ctx.createBuffer(1, 1, 22050);
+          const src = ctx.createBufferSource();
+          src.buffer = silent;
+          src.connect(ctx.destination);
+          src.start(0);
+        } catch {}
       }
-      if (audioContextRef.current.state === "suspended") {
+      if (audioContextRef.current.state !== "running") {
         audioContextRef.current.resume().catch(() => {});
       }
       return audioContextRef.current;

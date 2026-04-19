@@ -26,14 +26,17 @@ async function synthesize(text: string): Promise<Response> {
       response_format: "mp3",
     });
 
-    // Pipe die ReadableStream direkt durch — kein arrayBuffer-Buffering.
-    // Damit kann der Browser bereits abspielen, während das MP3 noch lädt.
-    return new Response(speech.body, {
+    // Vollständiges MP3 zurückgeben — der Web-Audio-API-Client
+    // braucht sowieso den ganzen Buffer für decodeAudioData.
+    // Manuelles Transfer-Encoding: chunked weggelassen (konfligiert mit
+    // Node's automatischem Streaming-Handling auf Vercel).
+    const arrayBuffer = await speech.arrayBuffer();
+    return new Response(arrayBuffer, {
       status: 200,
       headers: {
         "Content-Type": "audio/mpeg",
         "Cache-Control": "no-store",
-        "Transfer-Encoding": "chunked",
+        "Content-Length": String(arrayBuffer.byteLength),
       },
     });
   } catch (err) {
