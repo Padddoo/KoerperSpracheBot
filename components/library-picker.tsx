@@ -1,10 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import { FileText, Plus, Trash2, Pencil, Check, X } from "lucide-react";
+import {
+  CheckCircle2,
+  Circle,
+  CircleDot,
+  FileText,
+  Plus,
+  Trash2,
+  Pencil,
+  Check,
+  X,
+} from "lucide-react";
 import type { LibraryEntry, ProgressForMaterial } from "@/types";
 import { displayNameFor, relativeTime } from "@/lib/library";
-import { totalsForMaterial } from "@/lib/progress";
+import { masteryOf, totalsForMaterial } from "@/lib/progress";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -154,6 +164,34 @@ export function LibraryPicker({
                     )}
                   </div>
                 </div>
+                {entry.topics.length > 0 && !isEditing && (
+                  <button
+                    type="button"
+                    onClick={() => onSelect(entry)}
+                    className="w-full border-t-2 border-fg/10 px-4 py-3 text-left"
+                  >
+                    <ul className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                      {entry.topics.map((t) => {
+                        const status = masteryOf(p[t]);
+                        return (
+                          <li
+                            key={t}
+                            className="flex items-center gap-1.5 text-sm text-fg/80"
+                          >
+                            {status === "mastered" ? (
+                              <CheckCircle2 className="h-3.5 w-3.5 flex-none text-emerald-600" />
+                            ) : status === "in_progress" ? (
+                              <CircleDot className="h-3.5 w-3.5 flex-none text-accent" />
+                            ) : (
+                              <Circle className="h-3.5 w-3.5 flex-none text-fg/30" />
+                            )}
+                            <span className="truncate">{t}</span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </button>
+                )}
               </div>
             );
           })}
