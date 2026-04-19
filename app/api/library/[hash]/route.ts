@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { libraryKey, normalizeCode, progressKey, redis } from "@/lib/kv";
+import { extractTopics } from "@/lib/extract-topics";
 import type { LibraryEntry, ProgressForMaterial } from "@/types";
 
 export const runtime = "nodejs";
@@ -84,7 +85,10 @@ export async function PATCH(
       );
     }
     const { hash } = await params;
-    const body = (await req.json()) as { displayName?: string };
+    const body = (await req.json()) as {
+      displayName?: string;
+      action?: "reextract";
+    };
     const library = await loadLibrary(code);
     const idx = library.findIndex((e) => e.materialHash === hash);
     if (idx < 0) {
@@ -93,6 +97,25 @@ export async function PATCH(
         { status: 404 },
       );
     }
+
+    // Themen nachträglich erkennen
+    if (body.action === "reextract") {
+      const material = library[idx].material ?? "";
+      if (!material) {
+        return NextResponse.json(
+          { error: "Material fehlt — bitte neu hochladen." },
+          { status: 400 },
+        );
+      }
+      const topics = await extractTopics(material);
+      library[idx] = {
+        ...library[idx],
+        topics,
+      };
+      await redis().set(libraryKey(code), JSON.stringify(library));
+      return NextResponse.json({ library });
+    }
+
     const name = (body.displayName ?? "").trim();
     library[idx] = {
       ...library[idx],
@@ -103,7 +126,7 @@ export async function PATCH(
   } catch (err) {
     console.error("[library PATCH] error:", err);
     return NextResponse.json(
-      { error: "Umbenennen fehlgeschlagen." },
+      { error: "Speichern fehlgeschlagen." },
       { status: 500 },
     );
   }

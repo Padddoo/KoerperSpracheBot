@@ -6,10 +6,12 @@ import {
   Circle,
   CircleDot,
   FileText,
+  Loader2,
   Plus,
   Trash2,
   Pencil,
   Check,
+  Sparkles,
   X,
 } from "lucide-react";
 import type { LibraryEntry, ProgressForMaterial } from "@/types";
@@ -27,6 +29,7 @@ interface Props {
   onNewUpload: () => void;
   onDelete: (entry: LibraryEntry) => void | Promise<void>;
   onRename: (entry: LibraryEntry, newName: string) => void | Promise<void>;
+  onReextract?: (entry: LibraryEntry) => void | Promise<void>;
   onChangeCode: () => void;
 }
 
@@ -37,11 +40,13 @@ export function LibraryPicker({
   onNewUpload,
   onDelete,
   onRename,
+  onReextract,
   onChangeCode,
 }: Props) {
   const sorted = [...library].sort((a, b) => b.lastUsedAt - a.lastUsedAt);
   const [editingHash, setEditingHash] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
+  const [extractingHash, setExtractingHash] = useState<string | null>(null);
 
   const startRename = (entry: LibraryEntry) => {
     setEditingHash(entry.materialHash);
@@ -164,7 +169,7 @@ export function LibraryPicker({
                     )}
                   </div>
                 </div>
-                {entry.topics.length > 0 && !isEditing && (
+                {!isEditing && entry.topics.length > 0 && (
                   <button
                     type="button"
                     onClick={() => onSelect(entry)}
@@ -191,6 +196,36 @@ export function LibraryPicker({
                       })}
                     </ul>
                   </button>
+                )}
+                {!isEditing && entry.topics.length === 0 && onReextract && (
+                  <div className="w-full border-t-2 border-fg/10 px-4 py-3">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (extractingHash) return;
+                        setExtractingHash(entry.materialHash);
+                        try {
+                          await onReextract(entry);
+                        } finally {
+                          setExtractingHash(null);
+                        }
+                      }}
+                      disabled={extractingHash === entry.materialHash}
+                      className="inline-flex items-center gap-1.5 rounded-lg border-2 border-fg/20 px-2 py-1 text-xs font-semibold text-fg/70 hover:bg-accent-soft hover:text-fg disabled:opacity-60"
+                    >
+                      {extractingHash === entry.materialHash ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          Analysiere…
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="h-3.5 w-3.5" />
+                          Themen erkennen
+                        </>
+                      )}
+                    </button>
+                  </div>
                 )}
               </div>
             );
